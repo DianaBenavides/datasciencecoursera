@@ -1,0 +1,243 @@
+---
+title: "Analyzing exercise data"
+author: "Diana Benavides"
+date: "Sunday, May 24th, 2015"
+output: html_document
+---
+
+#Overview
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geek. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. There is some popular dataset related to accelerometers on the belt, forearm, arm, and dumbell of 6 participants (available at ***http://groupware.les.inf.puc-rio.br/har***). They were asked to perform barbell lifts correctly and incorrectly in 5 different ways.
+
+This analysis will construct a model for describing and predicting body performance according to movements on the belt, forearm, arm and dumbell of any person, given a set of data. 
+
+#Exploratory data analysis
+We will use ***two different datasets***, one for training and other for testing our model. The first dataset is composed of 19622 rows and 160 columns; the final column contains our outcome variable, with the following body performance values (see Appendix, code chunk #1): 
+
+* Exactly according to the specification (Class A)
+* Throwing the elbows to the front (Class B)
+* Lifting the dumbbell only halfway (Class C)
+* Lowering the dumbbell only halfway (Class D)
+* Throwing the hips to the front (Class E)
+
+```{r, echo=FALSE}
+library(ISLR)
+library(ggplot2)
+library(caret)
+library(randomForest)
+
+#READING DATA
+training<-read.csv("pml-training.csv")
+validation<-read.csv("pml-testing.csv")
+```
+
+Class distribution for our training data is as shown below (see Appendix, code chunk #2): 
+```{r, echo=FALSE}
+counts <- table(training$classe)
+barplot(counts,main="Weight Lifting Exercise", names.arg=c("A", "B", "C", "D", "E"), col=c("green", "blue", "yellow", "orange", "red"))
+```
+
+Our testing dataset is composed of 20 rows and 160 columns, without any valid value for our outcome variable. 
+
+#Data preparation
+Since we have 160 variables involved in our training data, and we also have lots of null values in or test data, we need to perform several pre-processing steps in order to reduce the variable set as well as guarantying that our model will be able to predict test cases in a correct way. After applying operations such as elimination of variables in the training set for which there existed no value in the test set, replacing null values in the training set with mean values for the respective column, and standardizing our data, we finally obtain the following ***52 variables along with our class variable*** (see Appendix, code chunk #3): 
+
+```{r, echo=FALSE}
+#PRE-PROCESSING DATA
+
+#Divide by numeric and factor variables
+numericValidation<-validation[sapply(validation,is.numeric)]
+vars<-colnames(training) %in% colnames(numericValidation)
+
+numericTraining <- training[vars]
+
+vars2<-colnames(numericValidation) %in% colnames(numericTraining)
+numericValidation <- numericValidation[vars2]
+
+factorTraining <- training[sapply(training,is.factor)]
+
+factorValidation <- validation[sapply(validation,is.factor)]
+
+#Replace missing values
+#columns and their means
+for(i in 1:ncol(numericTraining)){
+  numericTraining[is.na(numericTraining[,i]), i] <- mean(numericTraining[,i], na.rm = TRUE)
+  numericValidation[is.na(numericTraining[,i]), i] <- mean(numericTraining[,i], na.rm = TRUE)
+}
+
+#Since most of the variables have large standard deviations, standardizing all numeric variables
+preObj<-preProcess(numericTraining,method=c("center","scale"))
+numericTraining<-predict(preObj, numericTraining, )
+
+preObj<-preProcess(numericValidation,method=c("center","scale"))
+numericValidation<-predict(preObj, numericValidation, )
+
+#Since all of the factor variables seem to be noise, or identifiers, they are removed from analysis
+finalTraining<-cbind.data.frame(numericTraining,factorTraining$classe)
+colnames(finalTraining)[57]<-"classe"
+finalTraining<-as.data.frame(finalTraining)
+
+#Remove useless columns
+finalTraining<-finalTraining[,-1]
+finalTraining<-finalTraining[,-1]
+finalTraining<-finalTraining[,-1]
+finalTraining<-finalTraining[,-1]
+
+finalValidation<-as.data.frame(numericValidation)
+#finalValidation<-as.numeric(finalValidation)
+finalValidation$classe<-c("A","A","A","A","A","A","A","A","A","A","A","A","A","A","A","A","A","A","A","A")
+finalValidation$classe<-as.factor(finalValidation$classe)
+finalValidation<-finalValidation[,-1]
+finalValidation<-finalValidation[,-1]
+finalValidation<-finalValidation[,-1]
+finalValidation<-finalValidation[,-1]
+
+names(finalValidation)<-names(finalTraining)
+
+#Our final variables are...
+names(finalTraining)
+```
+
+As a second pre-processing step, we performed ***principal-component analysis (PCA)***, in order to obtain a reduced set of variables for our model (see Appendix, code chunk #4). 
+
+```{r, echo=FALSE}
+#Preprocessing
+preProc<-preProcess(finalTraining[,-53], method="pca", na.remove=T)
+trainPC<-predict(preProc, finalTraining[,-53])
+```
+
+#Prediction model
+For our prediction model, and because of its theoretical high accuracy, we select ***random forests*** as our technique. We apply repeated cross-validation with the idea of obtaining a more accurate and less overfitted model. Our model accuracy resulted to be very high (see Appendix, code chunk #5): 
+
+```{r, echo=FALSE}
+#CV
+fitControl <- trainControl(method = "repeatedcv",number = 10,repeats = 10)
+
+#PREDICTING (with PCA)
+set.seed(825)
+modelFit<-randomForest(finalTraining$classe ~ ., data=trainPC, trControl=fitControl)
+modelFit
+```
+
+A graphic representation of our random forests model is as shown below (see Appendix, code chunk #6): 
+```{r, echo=FALSE}
+plot(modelFit, log='y')
+legend("right", colnames(modelFit$err.rate),col=1:4,cex=0.8,fill=1:4)
+```
+
+We test it with our testing data, for which we don't know classes values (we assigned class A only for testing purposes), and we obtain the following predictions (see Appendix, code chunk #7):*
+
+```{r, echo=FALSE}
+testPC<-predict(preProc, finalValidation[,-53])
+table(finalValidation$classe, predict(modelFit, testPC))
+```
+
+*We obtained 19/20 correct predictions in the programming assignment presented along with this report, thus obtaining an out-of-sample error of only 0.05.
+
+#Conclusion and final remarks
+As part of this experiment, ***we built a random forests model for predicting body performance according to a set of measures over human body***. Our model implied, besides availability of data, several pre-processing steps such as removing nulls, standardizing variables and performing PCA. 
+
+#APPENDIX
+- Code chunk #1
+```{r, echo=TRUE, eval=FALSE}
+library(ISLR)
+library(ggplot2)
+library(caret)
+library(randomForest)
+
+#READING DATA
+training<-read.csv("pml-training.csv")
+validation<-read.csv("pml-testing.csv")
+```
+
+- Code chunk #2
+```{r, echo=TRUE, eval=FALSE}
+counts <- table(training$classe)
+barplot(counts,main="Weight Lifting Exercise", names.arg=c("A", "B", "C", "D", "E"), col=c("green", "blue", "yellow", "orange", "red"))
+```
+
+- Code chunk #3
+```{r, echo=TRUE, eval=FALSE}
+#PRE-PROCESSING DATA
+
+#Divide by numeric and factor variables
+numericValidation<-validation[sapply(validation,is.numeric)]
+vars<-colnames(training) %in% colnames(numericValidation)
+
+numericTraining <- training[vars]
+
+vars2<-colnames(numericValidation) %in% colnames(numericTraining)
+numericValidation <- numericValidation[vars2]
+
+factorTraining <- training[sapply(training,is.factor)]
+
+factorValidation <- validation[sapply(validation,is.factor)]
+
+#Replace missing values
+#columns and their means
+for(i in 1:ncol(numericTraining)){
+  numericTraining[is.na(numericTraining[,i]), i] <- mean(numericTraining[,i], na.rm = TRUE)
+  numericValidation[is.na(numericTraining[,i]), i] <- mean(numericTraining[,i], na.rm = TRUE)
+}
+
+#Since most of the variables have large standard deviations, standardizing all numeric variables
+preObj<-preProcess(numericTraining,method=c("center","scale"))
+numericTraining<-predict(preObj, numericTraining, )
+
+preObj<-preProcess(numericValidation,method=c("center","scale"))
+numericValidation<-predict(preObj, numericValidation, )
+
+#Since all of the factor variables seem to be noise, or identifiers, they are removed from analysis
+finalTraining<-cbind.data.frame(numericTraining,factorTraining$classe)
+colnames(finalTraining)[57]<-"classe"
+finalTraining<-as.data.frame(finalTraining)
+
+#Remove useless columns
+finalTraining<-finalTraining[,-1]
+finalTraining<-finalTraining[,-1]
+finalTraining<-finalTraining[,-1]
+finalTraining<-finalTraining[,-1]
+
+finalValidation<-as.data.frame(numericValidation)
+#finalValidation<-as.numeric(finalValidation)
+finalValidation$classe<-c("A","A","A","A","A","A","A","A","A","A","A","A","A","A","A","A","A","A","A","A")
+finalValidation$classe<-as.factor(finalValidation$classe)
+finalValidation<-finalValidation[,-1]
+finalValidation<-finalValidation[,-1]
+finalValidation<-finalValidation[,-1]
+finalValidation<-finalValidation[,-1]
+
+names(finalValidation)<-names(finalTraining)
+
+#Our final variables are...
+names(finalTraining)
+```
+
+- Code chunk #4
+```{r, echo=TRUE, eval=FALSE}
+#Preprocessing
+preProc<-preProcess(finalTraining[,-53], method="pca", na.remove=T)
+trainPC<-predict(preProc, finalTraining[,-53])
+```
+
+- Code chunk #5
+```{r, echo=TRUE, eval=FALSE}
+#CV
+fitControl <- trainControl(method = "repeatedcv",number = 10,repeats = 10)
+
+#PREDICTING (with PCA)
+set.seed(825)
+modelFit<-randomForest(finalTraining$classe ~ ., data=trainPC, trControl=fitControl)
+modelFit
+```
+
+- Code chunk #6
+```{r, echo=TRUE, eval=FALSE}
+plot(modelFit, log='y')
+legend("right", colnames(modelFit$err.rate),col=1:4,cex=0.8,fill=1:4)
+```
+
+- Code chunk #7
+```{r, echo=TRUE, eval=FALSE}
+testPC<-predict(preProc, finalValidation[,-53])
+table(finalValidation$classe, predict(modelFit, testPC))
+```
